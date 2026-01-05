@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-NodeSeek Hybrid Auto Signin Script
+DeepFlood Hybrid Auto Signin Script
 融合三个脚本优势的混合签到器 - GitHub Actions 优化版
 
 Features:
 - 渐进式 Fallback: HTTP → Proxy → Selenium 
-- 多账户批处理 (来自 nodeseek_sign.py)
+- 多账户批处理 (来自 deepflood_sign.py)
 - 环境检测与优化 (GitHub Actions / Qinglong / Local)
 - Cookie 自动管理与持久化
 - 可选的30天统计追踪
 - 无需验证码服务依赖
 
-Author: Based on multiple NodeSeek signin scripts
+Author: Based on multiple DeepFlood signin scripts
 License: MIT
 """
 
@@ -141,7 +141,7 @@ class EnvironmentDetector:
             'enable_statistics': os.environ.get("ENABLE_STATISTICS", "true").lower() == "true",
             'enable_selenium': os.environ.get("ENABLE_SELENIUM", "auto"),
             'proxy_url': os.environ.get("PROXY_URL", ""),
-            'random_mode': os.environ.get("NS_RANDOM", "false").lower() == "true",
+            'random_mode': os.environ.get("DF_RANDOM", "false").lower() == "true",
             'headless': os.environ.get("HEADLESS", "true").lower() == "true",
             'timeout': int(os.environ.get("TIMEOUT", "30")),
         }
@@ -162,7 +162,7 @@ class StatisticsTracker:
         self.cookie = cookie
         
     def get_signin_stats(self, days: int = 30) -> Tuple[Optional[Dict], str]:
-        """获取签到统计 (来自 nodeseek_sign.py)"""
+        """获取签到统计 (来自 deepflood_sign.py)"""
         if not self.cookie:
             return None, "无有效Cookie"
         
@@ -177,7 +177,7 @@ class StatisticsTracker:
             
             # 最多查询10页 (GitHub Actions 资源限制)
             while page <= 10:
-                url = f"https://www.nodeseek.com/api/account/credit/page-{page}"
+                url = f"https://www.deepflood.com/api/account/credit/page-{page}"
                 
                 if USE_CURL_CFFI:
                     try:
@@ -259,9 +259,9 @@ class HTTPSigner:
             'Connection': 'keep-alive',
             'Content-Type': 'application/json',
             'Cookie': cookie,
-            'Host': 'www.nodeseek.com',
-            'Origin': 'https://www.nodeseek.com',
-            'Referer': 'https://www.nodeseek.com/board',
+            'Host': 'www.deepflood.com',
+            'Origin': 'https://www.deepflood.com',
+            'Referer': 'https://www.deepflood.com/board',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
             'X-Requested-With': 'XMLHttpRequest'
         }
@@ -278,7 +278,7 @@ class HTTPSigner:
             
             # 构造签到请求
             random_param = "true" if self.config['random_mode'] else "false"
-            url = f"https://www.nodeseek.com/api/attendance?random={random_param}"
+            url = f"https://www.deepflood.com/api/attendance?random={random_param}"
             
             # 发送请求
             if USE_CURL_CFFI:
@@ -388,7 +388,7 @@ class SeleniumSigner:
             self.create_driver()
             
             # 访问网站
-            self.driver.get("https://www.nodeseek.com")
+            self.driver.get("https://www.deepflood.com")
             WebDriverWait(self.driver, 30).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
@@ -400,7 +400,7 @@ class SeleniumSigner:
                     self.driver.add_cookie({
                         "name": name,
                         "value": value,
-                        "domain": ".nodeseek.com",
+                        "domain": ".deepflood.com",
                         "path": "/",
                     })
                 except:
@@ -426,7 +426,7 @@ class SeleniumSigner:
                     return SigninResult(False, "Selenium 登录验证失败", "selenium")
             
             # 访问签到页面
-            self.driver.get("https://www.nodeseek.com/board")
+            self.driver.get("https://www.deepflood.com/board")
             WebDriverWait(self.driver, 30).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, ".head-info > div"))
             )
@@ -441,12 +441,16 @@ class SeleniumSigner:
                 return SigninResult(True, f"今日已签到: {info_text}", "selenium")
             
             # 执行签到
-            sign_div = WebDriverWait(self.driver, 15).until(
-                EC.presence_of_element_located((
-                    By.XPATH, "//div[button[text()='鸡腿 x 5'] and button[text()='试试手气']]"
-                ))
-            )
-            
+            try:
+                sign_div = WebDriverWait(self.driver, 15).until(
+                    EC.presence_of_element_located((
+                        By.XPATH, "//div[button[text()='鸡腿 x 5'] and button[text()='试试手气']]"
+                    ))
+                )
+            except:
+                # Fallback to general button search
+                sign_div = head_info
+
             if self.config['random_mode']:
                 button = sign_div.find_element(By.XPATH, ".//button[text()='试试手气']")
                 mode = "试试手气"
@@ -471,8 +475,8 @@ class SeleniumSigner:
             if self.driver:
                 self.driver.quit()
 
-class NodeSeekHybridSigner:
-    """NodeSeek 混合签到器主类"""
+class DeepFloodHybridSigner:
+    """DeepFlood 混合签到器主类"""
     
     def __init__(self):
         self.config = EnvironmentDetector.get_env_config()
@@ -484,12 +488,12 @@ class NodeSeekHybridSigner:
         logging.info(f"🤖 Selenium: {'可用' if self.selenium_signer else '不可用'}")
         
     def load_accounts(self) -> List[AccountConfig]:
-        """加载账户配置 (来自 nodeseek_sign.py 逻辑)"""
+        """加载账户配置"""
         accounts = []
         cookies = []
         
         # 解析 Cookie 字符串
-        cookie_str = os.environ.get("NS_COOKIE", "")
+        cookie_str = os.environ.get("DF_COOKIE", "")
         if cookie_str:
             cookies = [c.strip() for c in cookie_str.split("&") if c.strip()]
         
@@ -592,7 +596,7 @@ class NodeSeekHybridSigner:
     
     def run(self):
         """主执行流程"""
-        logging.info("🚀 NodeSeek 混合签到器启动")
+        logging.info("🚀 DeepFlood 混合签到器启动")
         logging.info("=" * 50)
         
         accounts = self.load_accounts()
@@ -603,8 +607,6 @@ class NodeSeekHybridSigner:
         logging.info(f"📋 发现 {len(accounts)} 个账户")
         
         results = []
-        cookies_updated = False
-        updated_cookies = []
         expired_accounts = []  # 记录Cookie过期的账户
         
         for account in accounts:
@@ -622,18 +624,16 @@ class NodeSeekHybridSigner:
             
             if result.success:
                 logging.info(f"✅ {account.display_name}: {result.message}")
-                updated_cookies.append(account.cookie)
                 
                 # 发送通知
                 if NOTIFICATION_AVAILABLE:
                     try:
-                        send(f"NodeSeek 签到成功", f"{account.display_name}: {result.message}")
+                        send(f"DeepFlood 签到成功", f"{account.display_name}: {result.message}")
                     except Exception as e:
                         logging.warning(f"⚠️  通知发送失败: {str(e)}")
                         
             else:
                 logging.error(f"❌ {account.display_name}: {result.message}")
-                updated_cookies.append(account.cookie)  # 保持原 Cookie
                 
                 # 检查是否Cookie过期
                 if result.cookie_expired:
@@ -643,17 +643,17 @@ class NodeSeekHybridSigner:
                 # 发送失败通知
                 if NOTIFICATION_AVAILABLE:
                     try:
-                        send(f"NodeSeek 签到失败", f"{account.display_name}: {result.message}")
+                        send(f"DeepFlood 签到失败", f"{account.display_name}: {result.message}")
                     except:
                         pass
         
         # 发送Cookie过期的TG通知
         if expired_accounts:
-            expired_msg = f"🚨 <b>NodeSeek Cookie过期提醒</b>\n\n"
+            expired_msg = f"🚨 <b>DeepFlood Cookie过期提醒</b>\n\n"
             expired_msg += f"以下账户的Cookie已过期，需要手动更新：\n"
             for i, account_name in enumerate(expired_accounts, 1):
                 expired_msg += f"{i}. {account_name}\n"
-            expired_msg += f"\n请到GitHub仓库的Variables页面更新NS_COOKIE变量"
+            expired_msg += f"\n请到GitHub仓库的Variables页面更新DF_COOKIE变量"
             
             # 发送TG通知
             if send_telegram_message(expired_msg):
@@ -670,7 +670,7 @@ class NodeSeekHybridSigner:
         logging.info(f"📊 签到完成: {success_count}/{len(results)} 成功")
         
         # 构建详细的签到结果消息
-        summary_msg = f"🌟 <b>NodeSeek 签到报告</b>\n"
+        summary_msg = f"🌟 <b>DeepFlood 签到报告</b>\n"
         summary_msg += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
         
         # 成功账户详情
@@ -680,8 +680,8 @@ class NodeSeekHybridSigner:
             for i, (account, result) in enumerate(success_results, 1):
                 # 提取鸡腿信息
                 if "鸡腿" in result.message:
-                    drumstick_info = result.message.split("：")[-1] if "：" in result.message else result.message
-                    summary_msg += f"📱 账户{i}：{drumstick_info}\n"
+                    info = result.message.split("：")[-1] if "：" in result.message else result.message
+                    summary_msg += f"📱 账户{i}：{info}\n"
                 else:
                     summary_msg += f"📱 账户{i}：{result.message}\n"
             summary_msg += "\n"
@@ -719,7 +719,7 @@ class NodeSeekHybridSigner:
 def main():
     """主函数"""
     try:
-        signer = NodeSeekHybridSigner()
+        signer = DeepFloodHybridSigner()
         signer.run()
     except KeyboardInterrupt:
         logging.info("⏹️  用户中断执行")
