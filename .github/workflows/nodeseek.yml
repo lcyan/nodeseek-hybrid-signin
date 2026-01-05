@@ -9,7 +9,7 @@ on:
       enable_statistics:
         description: "是否启用30天统计"
         required: false
-        default: "true"
+        default: "false"
         type: choice
         options:
           - "true"
