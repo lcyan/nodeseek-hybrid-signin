@@ -35,7 +35,6 @@ except ImportError:
     USE_CURL_CFFI = False
     print("⚠️  使用 requests 库 (建议安装 curl_cffi)")
 
-# 尝试导入 Selenium (fallback 使用)
 SELENIUM_AVAILABLE = False
 try:
     from selenium import webdriver
@@ -43,6 +42,7 @@ try:
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
     import undetected_chromedriver as uc
     SELENIUM_AVAILABLE = True
     print("✅ Selenium 终极 Fallback 可用")
@@ -352,7 +352,10 @@ class SeleniumSigner:
         """创建 WebDriver"""
         if not SELENIUM_AVAILABLE:
             raise ImportError("Selenium 不可用")
-            
+        
+        # 检测环境
+        is_qinglong = self.config.get('environment') == 'qinglong'
+        
         chrome_options = Options()
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
@@ -367,20 +370,68 @@ class SeleniumSigner:
             "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
         )
         
-        try:
-            self.driver = uc.Chrome(options=chrome_options)
-        except:
-            # GitHub Actions fallback
-            self.driver = webdriver.Chrome(options=chrome_options)
+        # 青龙面板环境：使用系统安装的 chromium
+        if is_qinglong:
+            # 尝试常见的 chromium 路径
+            chromium_paths = [
+                "/usr/bin/chromium",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/google-chrome",
+            ]
+            chromedriver_paths = [
+                "/usr/bin/chromedriver",
+                "/usr/lib/chromium/chromedriver",
+                "/usr/local/bin/chromedriver",
+            ]
+            
+            chromium_binary = None
+            chromedriver_binary = None
+            
+            for path in chromium_paths:
+                if os.path.exists(path):
+                    chromium_binary = path
+                    break
+                    
+            for path in chromedriver_paths:
+                if os.path.exists(path):
+                    chromedriver_binary = path
+                    break
+            
+            if chromium_binary:
+                chrome_options.binary_location = chromium_binary
+                logging.info(f"📦 使用 Chromium: {chromium_binary}")
+            
+            if chromedriver_binary:
+                service = Service(chromedriver_binary)
+                logging.info(f"📦 使用 ChromeDriver: {chromedriver_binary}")
+                try:
+                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                except Exception as e:
+                    logging.warning(f"⚠️  ChromeDriver 启动失败: {e}")
+                    # 回退到 undetected_chromedriver
+                    self.driver = uc.Chrome(options=chrome_options)
+            else:
+                # 没找到 chromedriver，尝试 undetected_chromedriver
+                self.driver = uc.Chrome(options=chrome_options)
+        else:
+            # 非青龙环境：优先使用 undetected_chromedriver
+            try:
+                self.driver = uc.Chrome(options=chrome_options)
+            except:
+                # GitHub Actions fallback
+                self.driver = webdriver.Chrome(options=chrome_options)
             
         # 隐藏自动化特征
-        self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-            "source": """
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-            """
-        })
+        try:
+            self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                "source": """
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                """
+            })
+        except:
+            pass  # 某些 driver 不支持 CDP
         
     def signin(self, cookie: str) -> SigninResult:
         """Selenium 签到"""
@@ -462,7 +513,28 @@ class SeleniumSigner:
             time.sleep(0.5)
             button.click()
             
+            # 等待签到结果
+            time.sleep(2)
+            
+            # 尝试获取签到结果（页面可能会显示获得的鸡腿数）
+            try:
+                # 等待按钮消失或页面更新
+                WebDriverWait(self.driver, 10).until(
+                    lambda d: len(d.find_elements(By.XPATH, "//div[button[text()='鸡腿 x 5']]")) == 0
+                )
+                
+                # 重新获取页面信息
+                head_info = self.driver.find_element(By.CSS_SELECTOR, ".head-info > div")
+                result_text = head_info.text.strip()
+                
+                # 检查是否包含签到结果
+                if "鸡腿" in result_text or "签到" in result_text:
+                    return SigninResult(True, f"Selenium 签到成功 ({mode}): {result_text}", "selenium")
+            except:
+                pass
+            
             return SigninResult(True, f"Selenium 签到成功 ({mode})", "selenium")
+
             
         except Exception as e:
             error_msg = str(e)
